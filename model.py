@@ -335,6 +335,8 @@ class Hidden_Layer(nn.Module): #Hidden Layer, Binary classification
             dot_x = torch.mul(f_embs,s_embs).sum(dim=1,keepdim=True)
             pdist_x = self.pdist(f_embs,s_embs)
             x = torch.cat([x,cos_x,dot_x,pdist_x],dim=1)
+            if self.BCE_mode:
+                x = self.linear_output(x)
         elif self.mode == 'cos':
             x = self.cos(f_embs,s_embs).unsqueeze(1)
         elif self.mode == 'dot':
@@ -361,12 +363,16 @@ class Hidden_Layer(nn.Module): #Hidden Layer, Binary classification
             dot_x = torch.mul(f_embs,s_embs).sum(dim=1,keepdim=True)
             pdist_x = self.pdist(f_embs,s_embs)
             x = torch.cat([x,cos_x,dot_x,pdist_x],dim=1)
+            if self.BCE_mode:
+                x = self.linear_output(x)
         elif self.mode == 'cos':
             x = self.cos(f_embs,s_embs)
         elif self.mode == 'dot':
             x = torch.mul(f_embs,s_embs).sum(dim=1)
         elif self.mode == 'pdist':
             x = -self.pdist(f_embs,s_embs).squeeze()
+        if self.BCE_mode:
+            return x.squeeze()
         return x
 
 
@@ -379,8 +385,9 @@ class Emb(torch.nn.Module):
 
     def forward(self, data):
         x = data.x
-        x = torch.mm(x, self.attr_emb(torch.arange(self.attr_num).to(self.attr_emb.weight.device)))
-        return x
+        if x.is_sparse:
+            return torch.sparse.mm(x, self.attr_emb.weight)
+        return torch.mm(x, self.attr_emb.weight)
 
 
 class DEAL(nn.Module):
@@ -456,14 +463,25 @@ class DEAL(nn.Module):
         b_1 = 0.1
         b_2 = 0.1
 
-        return torch.mean(labels*(torch.log(1+torch.exp(-scores*gamma_1+b_1)))/gamma_1+ torch.exp(dists)*(1-labels)*torch.log(1+torch.exp(scores*gamma_2+b_2))/gamma_2)
+        positive = labels * F.softplus(-scores * gamma_1 + b_1) / gamma_1
+        negative = (torch.exp(dists) * (1 - labels)
+                    * F.softplus(scores * gamma_2 + b_2) / gamma_2)
+        return torch.mean(positive + negative)
 
     def default_loss(self,inputs, labels, data,thetas=(1,1,1), train_num = 1330,c_nodes=None, c_labels=None):
         if self.BCE_mode:
             labels = labels.float()
         nodes = inputs.to(self.device)
         labels = labels.to(self.device)
-        dists = data.dists[nodes[:,0],nodes[:,1]] 
+        if getattr(data, 'distance_encoding', None) == 'uint8_hops':
+            pair_ids = nodes.detach().cpu().numpy()
+            encoded = np.asarray(data.dists[pair_ids[:, 0], pair_ids[:, 1]], dtype=np.float32)
+            dists = np.zeros_like(encoded)
+            reachable = encoded != 0
+            dists[reachable] = 1.0 / encoded[reachable]
+            dists = torch.from_numpy(dists).to(self.device)
+        else:
+            dists = data.dists[nodes[:,0],nodes[:,1]] 
 
         loss_list = []
 
