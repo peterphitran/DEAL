@@ -671,6 +671,12 @@ def get_us_attr_dict(X):
 
 #inductive
 def ind_eval(cmodel, nodes, gt_labels,X,nodes_keep, lambdas = (0,1,1)):
+    """Score full-graph inductive edges from node attributes.
+
+    Amazon validation and test arrays retain original full-graph node IDs, while
+    the learned node embeddings only cover the remapped training graph.  Use
+    the full feature matrix here so hidden nodes can still be represented.
+    """
 
     # anode_emb = torch.sparse.mm(data.x, cmodel.attr_emb(torch.arange(data.x.shape[1]).to(cmodel.device)))
     test_data = Data(X, None)
@@ -721,8 +727,10 @@ def detailed_eval(model,test_data,gt_labels,sp_M, evaluate,nodes_keep=None, verb
     return res
 
 def load_datafile(args):
+    """Load DEAL artifacts while preserving their stored ID-space convention."""
     nodes_keep = None
     device = torch.device('cuda:'+str(args.cuda) if args.gpu else 'cpu')
+    twitter_directed = args.dataset == 'ego-twitter'
 
     folder = './data/'+args.dataset+'/'
     
@@ -771,20 +779,34 @@ def load_datafile(args):
     ## test_ground_truth = torch.LongTensor(1-gt_labels) * 2 
 
     if args.inductive:
-        sp_X = convert_sSp_tSp(X).to(device).to_dense()
+        sp_X = convert_sSp_tSp(X).to(device)
+        if not twitter_directed:
+            sp_X = sp_X.to_dense()
         sp_attrM = convert_sSp_tSp(X_train).to(device)
         # us_attr_dict = get_us_attr_dict(X_train)
-        val_labels = A_train[val_edges[:, 0], val_edges[:, 1]].A1
+        """Amazon validation edges use full-graph IDs, so their labels must
+        come from A rather than the compact, remapped A_train graph."""
+        val_labels = A[val_edges[:, 0], val_edges[:, 1]].A1
     else:
         # sp_attrM = convert_sSp_tSp(X).to(device)
         # us_attr_dict = get_us_attr_dict(X)
         val_labels = A[val_edges[:, 0], val_edges[:, 1]].A1
     
-    data = Data(convert_sSp_tSp(X_train).to_dense().to(device), torch.LongTensor(train_ones.T).to(device))
+    train_features = convert_sSp_tSp(X_train).to(device)
+    if not twitter_directed:
+        train_features = train_features.to_dense()
+    data = Data(train_features, torch.LongTensor(train_ones.T).to(device))
 
-    data.dists = load_dists(args.dataset)
-     
-    if not data.dists is None:
+    if twitter_directed:
+        cache_path = folder + 'dists-1.u8.npy'
+        if not os.path.exists(cache_path):
+            raise FileNotFoundError('missing directed Twitter distance cache ' + cache_path)
+        data.dists = np.load(cache_path, mmap_mode='r')
+        data.distance_encoding = 'uint8_hops'
+    else:
+        data.dists = load_dists(args.dataset)
+
+    if not data.dists is None and not twitter_directed:
         data.dists = data.dists.to(device)
         preselect_anchor(data, layer_num=args.layer_num, anchor_num=64, device=device)
 
@@ -830,14 +852,23 @@ def preselect_anchor(data, layer_num=1, anchor_num=32, anchor_size_num=4, device
 
 
 def load_dists(dataset):
-    dists_file_name = 'data/' + dataset +'/dists-1.dat'
-    if os.path.exists(dists_file_name):
-        dists_file = open(dists_file_name, 'rb')
-        return pickle.load(dists_file)
-    else:
-        dists_file_name = 'data/' + dataset +'/dists2.dat'
-        if os.path.exists(dists_file_name):
-            return pickle.load(dists_file)
-        else:
-            return None
+    """Load a generated NumPy distance cache, with legacy pickle fallbacks.
 
+    New inductive datasets write dists-1.npy.  Older datasets retain their
+    existing dists-1.dat or dists2.dat files, so they do not need migration.
+    """
+    npy_file_name = 'data/' + dataset + '/dists-1.npy'
+    if os.path.exists(npy_file_name):
+        return torch.from_numpy(np.load(npy_file_name)).float()
+
+    dists_file_name = 'data/' + dataset + '/dists-1.dat'
+    if os.path.exists(dists_file_name):
+        with open(dists_file_name, 'rb') as dists_file:
+            return pickle.load(dists_file)
+
+    dists_file_name = 'data/' + dataset + '/dists2.dat'
+    if os.path.exists(dists_file_name):
+        with open(dists_file_name, 'rb') as dists_file:
+            return pickle.load(dists_file)
+
+    return None
