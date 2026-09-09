@@ -15,6 +15,73 @@ cuda 10.1
 ### Train DEAL
 `python train.py`
 
+### Inductive datasets in this fork
+
+This fork adds inductive artifact support for Amazon, PPI, ego-Facebook, and
+ego-Twitter.  Source graphs and generated artifacts live under `data/` and are
+not included in the repository.
+
+#### ego-Twitter
+
+ego-Twitter is directed, so it must use the order-sensitive `all` scorer and
+the sparse feature path:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python train.py \
+  --dataset ego-twitter --ind true --gpu --cuda 0 --mode all
+```
+
+Before training, `data/ego-twitter/` must contain the generated directed
+distance cache `dists-1.u8.npy`.  The cache stores compact hop distances and
+is memory-mapped so the full matrix is not moved to GPU memory.
+
+#### Amazon Photo and Amazon Computers
+
+The Amazon co-purchase graphs are undirected and use the standard cosine
+scorer.  Replace the dataset name to choose a graph:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python train.py \
+  --dataset AmazonPhoto --ind true --gpu --cuda 0 --mode cos
+
+CUDA_VISIBLE_DEVICES=0 python train.py \
+  --dataset AmazonComputers --ind true --gpu --cuda 0 --mode cos
+```
+
+Each dataset folder needs its sparse source artifacts, inductive artifacts,
+and generated `dists-1.npy` cache.
+
+#### ego-Facebook
+
+ego-Facebook is also an undirected graph and uses the standard cosine scorer:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python train.py \
+  --dataset ego-facebook --ind true --gpu --cuda 0 --mode cos
+```
+
+Its dataset folder likewise needs the sparse source artifacts, inductive
+artifacts, and `dists-1.npy` cache.
+
+#### PPI
+
+PPI consists of separate graph components.  Train one component at a time:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python train.py \
+  --dataset PPI/train-0 --ind true --gpu --cuda 0 --mode cos
+```
+
+#### Dataset preparation tools
+
+The `peter_learning/` directory keeps the dataset preparation workflow
+separate from model training:
+
+- `loading_datasets.py` normalizes Amazon, SNAP-style, PPI, and saved DEAL
+  sources into a common `Graph` format.
+- `building_inductive_dataset.py` creates node splits, edge buckets, compact
+  training graphs, evaluation negatives, and DEAL artifacts.
+
 ### Datasets
 More datasets can be found at https://pytorch-geometric.readthedocs.io/en/latest/modules/datasets.html.
 
@@ -38,4 +105,3 @@ Please cite our IJCAI 2020 paper:
   url       = {https://doi.org/10.24963/ijcai.2020/168},
 }
 ```
-
