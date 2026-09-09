@@ -3,14 +3,44 @@
 This is the implementation of "[Inductive Link Prediction for Nodes Having Only Attribute Information
 ](https://www.ijcai.org/Proceedings/2020/168)" published at IJCAI 2020.
 
+## Fork additions
+
+This fork extends the original implementation with an inductive dataset
+workflow and support for Amazon, PPI, ego-Facebook, and directed ego-Twitter.
+
+- Sparse source and compact training artifacts for large feature matrices.
+- Directed ego-Twitter splits, oriented negative examples, an asymmetric
+  scorer, and a memory-mapped U8 hop-distance cache.
+- PPI support as multiple independent graph components.
+- Dataset loading, inductive-building, and validation tools in
+  `peter_learning/` and `tools/`.
+
 ### Environment
-pytorch 1.4.0
 
-python 3.7.4
+#### Fork environment
 
-pytorch-geometric 1.4.3
+This fork was run with a modern GPU environment:
 
-cuda 10.1
+- Python 3.10.20
+- PyTorch built with CUDA 12.8
+- A PyTorch Geometric version compatible with the installed PyTorch/CUDA build
+- NumPy, SciPy, scikit-learn, matplotlib, and tqdm
+
+Use a Conda environment or another isolated Python environment.  Confirm that
+CUDA is visible before training:
+
+```bash
+python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
+```
+
+#### Original environment
+
+The original implementation used:
+
+- PyTorch 1.4.0
+- Python 3.7.4
+- PyTorch Geometric 1.4.3
+- CUDA 10.1
 
 ### Train DEAL
 `python train.py`
