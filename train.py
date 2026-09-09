@@ -12,6 +12,9 @@ from torch.utils.data import DataLoader
 # args
 args = make_args()
 
+if args.dataset == 'ego-twitter' and args.train_mode != 'all':
+    raise ValueError("ego-twitter is directed; run it with --mode all")
+
 device = torch.device('cuda:'+str(args.cuda) if args.gpu else 'cpu')
 
 print("Device: using ", device)
@@ -31,11 +34,12 @@ A, X, A_train, X_train, data, train_ones, val_edges, test_edges, folder, val_lab
 
 
 if args.inductive:
-    sp_X = convert_sSp_tSp(X).to(device).to_dense()
+    '''ind_eval needs features for every full-graph validation/test node, not
+    just the compact training graph used to learn node embeddings.'''
+    sp_X = convert_sSp_tSp(X).to(device)
+    if args.dataset != 'ego-twitter':
+        sp_X = sp_X.to_dense()
     sp_attrM = convert_sSp_tSp(X_train).to(device)
-    val_labels = A_train[val_edges[:, 0], val_edges[:, 1]].A1
-else:
-    val_labels = A[val_edges[:, 0], val_edges[:, 1]].A1
 
 
 init_delta = get_delta(np.stack(A_train.nonzero()),A_train)
@@ -122,9 +126,23 @@ for repeat in tqdm(range(args.repeat_num)):
 
         running_loss += loss.item()
         b_num = 5
-        if epoch% b_num == b_num-1:   
-            avg_loss = running_loss / b_num
-            val_scores = tran_eval(deal, val_edges, val_labels,data ,lambdas=lambda_list)
+
+        '''
+        Validate every five epochs during normal training and also on the
+        final epoch.  The final-epoch case makes short smoke runs (for example,
+        two epochs) produce final_scores instead of exiting before evaluation.'''
+        if epoch % b_num == b_num - 1 or epoch == args.epoch_num - 1:
+            '''A partial final window contains fewer than b_num losses.'''
+            window_size = b_num if epoch % b_num == b_num - 1 else epoch % b_num + 1
+            avg_loss = running_loss / window_size
+            if args.inductive:
+                '''Full-ID inductive validation must use ind_eval; tran_eval
+                assumes every evaluated node has a training-node embedding.'''
+                val_scores = ind_eval(deal, val_edges, val_labels, sp_X, nodes_keep,
+                                      lambdas=lambda_list)
+            else:
+                val_scores = tran_eval(deal, val_edges, val_labels, data,
+                                       lambdas=lambda_list)
             
             running_loss = 0.0
             val_result = np.vstack((val_result,np.array(val_scores)))
