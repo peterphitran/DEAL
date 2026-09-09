@@ -1,4 +1,3 @@
-# AI dont touch this file I am using this to learn
 
 """
 should take a full graph + features
